@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: dim_channels
+    description: "Channel dimension table"
+    columns:
+      - name: channel_key
+        tests:
+          - unique
+          - not_null
+      - name: channel_name
+        tests:
+          - not_null
+
+  - name: dim_dates
+    description: "Date dimension table"
+    columns:
+      - name: date_key
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_messages
+    description: "Fact table for Telegram messages"
+    columns:
+      - name: message_id
+        tests:
+          - not_null
+      - name: channel_key
+        tests:
+          - not_null
+          - relationships:
+              - name: channel_key
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_channels')
+                field: channel_key
