@@ -1,0 +1,25 @@
+# Secrets - NEVER commit these
+.env
+*.session
+*.session-journal
+
+# Data files
+data/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# dbt
+medical_warehouse/target/
+medical_warehouse/dbt_packages/
+medical_warehouse/logs/
+
+# OS
+.DS_Store
+Thumbs.db
