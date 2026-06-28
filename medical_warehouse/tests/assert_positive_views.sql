@@ -4,4 +4,4 @@ select
     channel_name,
     views
 from {{ ref('stg_telegram_messages') }}
-where views < 0
+where views < 0dbt test
