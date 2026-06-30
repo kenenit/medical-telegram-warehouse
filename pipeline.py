@@ -1,83 +1,100 @@
 import subprocess
 import os
 from pathlib import Path
-from dagster import op, job, ScheduleDefinition, DefaultScheduleStatus, Definitions
+from dagster import op, job, ScheduleDefinition, DefaultScheduleStatus, Definitions, Failure
 
 BASE_DIR = Path(__file__).parent
+
+
+def run_subprocess(context, command, cwd, step_name):
+    """Run a subprocess and raise a Dagster Failure with details on error."""
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, cwd=cwd, timeout=1800
+        )
+    except subprocess.TimeoutExpired:
+        raise Failure(f"{step_name} timed out after 30 minutes")
+    except FileNotFoundError as e:
+        raise Failure(f"{step_name} failed: command not found — {e}")
+
+    context.log.info(result.stdout)
+    if result.stderr:
+        context.log.warning(result.stderr)
+
+    if result.returncode != 0:
+        raise Failure(
+            description=f"{step_name} failed with exit code {result.returncode}",
+            metadata={"stderr": result.stderr[-2000:] if result.stderr else "No stderr"}
+        )
+    return result
 
 
 @op
 def scrape_telegram_data(context):
     context.log.info("Starting Telegram scraping...")
-    result = subprocess.run(
+    run_subprocess(
+        context,
         ["python", str(BASE_DIR / "src" / "scraper.py")],
-        capture_output=True, text=True, cwd=BASE_DIR
+        BASE_DIR,
+        "Telegram scraper"
     )
-    context.log.info(result.stdout)
-    if result.returncode != 0:
-        raise Exception(f"Scraper failed: {result.stderr}")
     context.log.info("Scraping complete!")
 
 
 @op
 def load_raw_to_postgres(context):
     context.log.info("Loading raw data to PostgreSQL...")
-    result = subprocess.run(
+    run_subprocess(
+        context,
         ["python", str(BASE_DIR / "src" / "load_to_postgres.py")],
-        capture_output=True, text=True, cwd=BASE_DIR
+        BASE_DIR,
+        "PostgreSQL loader"
     )
-    context.log.info(result.stdout)
-    if result.returncode != 0:
-        raise Exception(f"Loader failed: {result.stderr}")
     context.log.info("Loading complete!")
 
 
 @op
 def run_dbt_transformations(context):
     context.log.info("Running dbt transformations...")
-    result = subprocess.run(
+    run_subprocess(
+        context,
         ["dbt", "run"],
-        capture_output=True, text=True,
-        cwd=BASE_DIR / "medical_warehouse"
+        BASE_DIR / "medical_warehouse",
+        "dbt run"
     )
-    context.log.info(result.stdout)
-    if result.returncode != 0:
-        raise Exception(f"dbt failed: {result.stderr}")
-
-    test_result = subprocess.run(
+    run_subprocess(
+        context,
         ["dbt", "test"],
-        capture_output=True, text=True,
-        cwd=BASE_DIR / "medical_warehouse"
+        BASE_DIR / "medical_warehouse",
+        "dbt test"
     )
-    context.log.info(test_result.stdout)
     context.log.info("dbt transformations complete!")
 
 
 @op
 def run_yolo_enrichment(context):
     context.log.info("Running YOLO object detection...")
-    result = subprocess.run(
+    run_subprocess(
+        context,
         ["python", str(BASE_DIR / "src" / "yolo_detect.py")],
-        capture_output=True, text=True, cwd=BASE_DIR
+        BASE_DIR,
+        "YOLO detector"
     )
-    context.log.info(result.stdout)
-    if result.returncode != 0:
-        raise Exception(f"YOLO failed: {result.stderr}")
-
-    load_result = subprocess.run(
+    run_subprocess(
+        context,
         ["python", str(BASE_DIR / "src" / "load_yolo_to_postgres.py")],
-        capture_output=True, text=True, cwd=BASE_DIR
+        BASE_DIR,
+        "YOLO results loader"
     )
-    context.log.info(load_result.stdout)
     context.log.info("YOLO enrichment complete!")
 
 
 @job
 def medical_pipeline():
-    raw_data = scrape_telegram_data()
-    loaded = load_raw_to_postgres()
-    transformed = run_dbt_transformations()
-    enriched = run_yolo_enrichment()
+    scrape_telegram_data()
+    load_raw_to_postgres()
+    run_dbt_transformations()
+    run_yolo_enrichment()
 
 
 daily_schedule = ScheduleDefinition(

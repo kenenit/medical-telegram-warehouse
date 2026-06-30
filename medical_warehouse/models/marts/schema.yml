@@ -30,10 +30,6 @@ models:
         tests:
           - not_null
           - relationships:
-              - name: channel_key
-        tests:
-          - not_null
-          - relationships:
               arguments:
                 to: ref('dim_channels')
                 field: channel_key

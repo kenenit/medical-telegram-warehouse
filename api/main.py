@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from typing import List
 from api.database import get_db
 from api import schemas
@@ -20,6 +21,9 @@ def root():
 @app.get("/api/reports/top-products", response_model=List[schemas.TopProduct])
 def top_products(limit: int = 10, db: Session = Depends(get_db)):
     """Returns the most frequently mentioned terms across all channels."""
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
     query = text("""
         SELECT word AS term, COUNT(*) as count
         FROM (
@@ -37,13 +41,20 @@ def top_products(limit: int = 10, db: Session = Depends(get_db)):
         ORDER BY count DESC
         LIMIT :limit
     """)
-    rows = db.execute(query, {"limit": limit}).fetchall()
+    try:
+        rows = db.execute(query, {"limit": limit}).fetchall()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=503, detail=f"Database error: {str(e)}")
+
     return [{"term": row[0], "count": row[1]} for row in rows]
 
 
 @app.get("/api/channels/{channel_name}/activity", response_model=schemas.ChannelActivity)
 def channel_activity(channel_name: str, db: Session = Depends(get_db)):
     """Returns posting activity and trends for a specific channel."""
+    if not channel_name or not channel_name.strip():
+        raise HTTPException(status_code=400, detail="channel_name cannot be empty")
+
     query = text("""
         SELECT
             channel_name,
@@ -56,15 +67,20 @@ def channel_activity(channel_name: str, db: Session = Depends(get_db)):
         FROM public.dim_channels
         WHERE lower(channel_name) = lower(:channel_name)
     """)
-    row = db.execute(query, {"channel_name": channel_name}).fetchone()
+    try:
+        row = db.execute(query, {"channel_name": channel_name}).fetchone()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=503, detail=f"Database error: {str(e)}")
+
     if not row:
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise HTTPException(status_code=404, detail=f"Channel '{channel_name}' not found")
+
     return {
         "channel_name": row[0],
         "channel_title": row[1],
         "channel_type": row[2],
         "total_posts": row[3],
-        "avg_views": float(row[4]),
+        "avg_views": float(row[4]) if row[4] is not None else 0.0,
         "first_post_date": row[5],
         "last_post_date": row[6],
     }
@@ -73,6 +89,11 @@ def channel_activity(channel_name: str, db: Session = Depends(get_db)):
 @app.get("/api/search/messages", response_model=List[schemas.MessageResult])
 def search_messages(query: str, limit: int = 20, db: Session = Depends(get_db)):
     """Searches for messages containing a specific keyword."""
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="query parameter cannot be empty")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
     sql = text("""
         SELECT
             message_id,
@@ -86,7 +107,11 @@ def search_messages(query: str, limit: int = 20, db: Session = Depends(get_db)):
         ORDER BY views DESC
         LIMIT :limit
     """)
-    rows = db.execute(sql, {"query": f"%{query}%", "limit": limit}).fetchall()
+    try:
+        rows = db.execute(sql, {"query": f"%{query}%", "limit": limit}).fetchall()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=503, detail=f"Database error: {str(e)}")
+
     return [
         {
             "message_id": row[0],
@@ -115,7 +140,11 @@ def visual_content(db: Session = Depends(get_db)):
         GROUP BY channel_name
         ORDER BY total_images DESC
     """)
-    rows = db.execute(query).fetchall()
+    try:
+        rows = db.execute(query).fetchall()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=503, detail=f"Database error: {str(e)}")
+
     return [
         {
             "channel_name": row[0],
